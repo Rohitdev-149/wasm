@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Compliance Automation</title>
+<link rel="icon" href="data:,">
+
+<style>
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    font-family: "Segoe UI", Arial, sans-serif;
+    background: #f3f4f6;
+    padding: 40px;
+  }
+
+  .container {
+    max-width: 960px;
+    margin: auto;
+  }
+
+  .card {
+    background: #ffffff;
+    padding: 36px;
+    border-radius: 16px;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.08);
+  }
+
+  /* ===== Header ===== */
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+
+  .dot {
+    width: 14px;
+    height: 14px;
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    border-radius: 50%;
+  }
+
+  h2 {
+    margin: 0;
+    font-size: 24px;
+  }
+
+  .subtitle {
+    margin-bottom: 24px;
+    color: #6b7280;
+    font-size: 14px;
+  }
+
+  /* ===== Upload Section ===== */
+  .upload-section {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+
+  .upload-card {
+    border: 2px dashed #d1d5db;
+    border-radius: 14px;
+    min-height: 160px;
+    padding: 24px;
+    text-align: center;
+    background: #f9fafb;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .upload-card:hover {
+    border-color: #dc2626;
+    background: #fef2f2;
+  }
+
+  input {
+    display: none;
+  }
+
+  .upload-title {
+    font-weight: 600;
+    font-size: 16px;
+    margin-bottom: 6px;
+    color: #1f2937;
+  }
+
+  .upload-hint {
+    font-size: 13px;
+    color: #6b7280;
+  }
+
+  /* ===== Uploaded Files ===== */
+  .files {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .file-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #f3f4f6;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 14px;
+  }
+
+  .ok {
+    color: #16a34a;
+    font-weight: 600;
+  }
+
+  /* ===== Actions ===== */
+  .actions {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+
+  button {
+    padding: 12px 22px;
+    border-radius: 10px;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    min-width: 220px;
+  }
+
+  .primary {
+    background: #dc2626;
+    color: white;
+  }
+
+  .secondary {
+    background: #9ca3af;
+    color: white;
+  }
+
+  button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+</style>
+</head>
+
+<body>
+<div class="container">
+  <div class="card">
+
+    <!-- Header -->
+    <div class="header">
+      <div class="dot"></div>
+      <h2>Compliance Automation (Task 3)</h2>
+    </div>
+
+    <p class="subtitle">
+      Upload User Access, Access Matrix, and Exception List Excel files to validate compliance.
+    </p>
+
+    <!-- Upload Section -->
+    <div class="upload-section">
+      <label class="upload-card">
+        <input type="file" id="files" multiple accept=".xlsx,.xls" />
+        <div class="upload-title">📂 Upload Excel Files</div>
+        <div class="upload-hint">
+          User_Access · Access_Matrix · Exception_List
+        </div>
+      </label>
+
+      <div class="files" id="fileList"></div>
+    </div>
+
+    <!-- Actions -->
+    <div class="actions">
+      <button class="primary" id="analyze">
+        Analyze Compliance
+      </button>
+
+      <button class="secondary" id="downloadViolations" disabled>
+        Download Violation Report
+      </button>
+
+      <button class="secondary" id="downloadSummary" disabled>
+        Download Compliance Summary
+      </button>
+    </div>
+
+  </div>
+</div>
+
+<!-- XLSX -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
+<!-- WASM + LOGIC -->
+<script type="module">
+import init, { process_compliance } from "../compliance_wasm/pkg/compliance_wasm.js";
+await init();
+
+const fileInput = document.getElementById("files");
+const fileList = document.getElementById("fileList");
+const analyzeBtn = document.getElementById("analyze");
+const downloadViolations = document.getElementById("downloadViolations");
+const downloadSummary = document.getElementById("downloadSummary");
+
+let violations = [];
+let summary = [];
+
+/* ===== Show uploaded files ===== */
+fileInput.addEventListener("change", () => {
+  fileList.innerHTML = "";
+  Array.from(fileInput.files).forEach(file => {
+    const div = document.createElement("div");
+    div.className = "file-item";
+    div.innerHTML = `
+      <span>${file.name}</span>
+      <span class="ok">✔ Uploaded</span>
+    `;
+    fileList.appendChild(div);
+  });
+});
+
+/* ===== Normalize Excel headers ===== */
+function normalize(rows) {
+  return rows
+    .filter(r => Object.keys(r).length > 0)
+    .map(r => {
+      const obj = {};
+      for (const k in r) {
+        obj[k.toLowerCase().replace(/\s+/g, "_")] = String(r[k]).trim();
+      }
+      return obj;
+    });
+}
+
+async function readExcel(file) {
+  const buffer = await file.arrayBuffer();
+  const wb = XLSX.read(buffer);
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  return normalize(XLSX.utils.sheet_to_json(sheet));
+}
+
+/* ===== File auto-detection ===== */
+function classifyFiles(files) {
+  let userAccess, accessMatrix, exceptionList;
+
+  Array.from(files).forEach(f => {
+    const name = f.name.toLowerCase();
+    if (name.includes("user")) userAccess = f;
+    else if (name.includes("matrix")) accessMatrix = f;
+    else if (name.includes("exception")) exceptionList = f;
+  });
+
+  if (!userAccess || !accessMatrix || !exceptionList) {
+    throw new Error(
+      "File detection failed.\n\nPlease upload:\n" +
+      "- User_Access.xlsx\n" +
+      "- Access_Matrix.xlsx\n" +
+      "- Exception_List.xlsx"
+    );
+  }
+
+  return { userAccess, accessMatrix, exceptionList };
+}
+
+/* ===== Analyze Compliance ===== */
+analyzeBtn.onclick = async () => {
+  if (fileInput.files.length !== 3) {
+    alert("Please upload exactly 3 Excel files");
+    return;
+  }
+
+  try {
+    const { userAccess, accessMatrix, exceptionList } =
+      classifyFiles(fileInput.files);
+
+    const ua = await readExcel(userAccess);
+    const am = await readExcel(accessMatrix);
+    const ex = await readExcel(exceptionList);
+
+    const result = JSON.parse(
+      process_compliance(
+        JSON.stringify(ua),
+        JSON.stringify(am),
+        JSON.stringify(ex)
+      )
+    );
+
+    violations = result.violations;
+    summary = result.summary;
+
+    downloadViolations.disabled = false;
+    downloadSummary.disabled = false;
+
+    alert("Compliance analysis completed successfully");
+  } catch (err) {
+    console.error(err);
+    alert(err.message);
+  }
+};
+
+/* ===== Download Excel ===== */
+function downloadExcel(data, filename) {
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+  XLSX.writeFile(wb, filename);
+}
+
+downloadViolations.onclick = () =>
+  downloadExcel(violations, "Violation_Report.xlsx");
+
+downloadSummary.onclick = () =>
+  downloadExcel(summary, "Compliance_Summary.xlsx");
+</script>
+
+</body>
+</html>

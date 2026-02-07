@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Data Quality & Risk Analysis</title>
+  <link rel="icon" href="data:,">
+
+  <style>
+    body {
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: #f4f6f9;
+      padding: 40px;
+    }
+
+    .card {
+      max-width: 900px;
+      margin: auto;
+      background: white;
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.1);
+    }
+
+    h2 { margin-top: 0; }
+
+    .upload-box {
+      border: 2px dashed #cbd5e1;
+      padding: 30px;
+      border-radius: 10px;
+      text-align: center;
+      cursor: pointer;
+      background: #fafafa;
+    }
+
+    input { display: none; }
+
+    .files {
+      margin-top: 15px;
+    }
+
+    .file-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px 14px;
+      background: #f9fafb;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+
+    .status-ok {
+      color: #16a34a;
+      font-weight: 600;
+    }
+
+    button {
+      margin-top: 20px;
+      padding: 12px 22px;
+      font-size: 14px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+    }
+
+    .primary {
+      background: #2563eb;
+      color: white;
+    }
+
+    .success {
+      background: #16a34a;
+      color: white;
+    }
+
+    button:disabled {
+      background: #9ca3af;
+      cursor: not-allowed;
+    }
+  </style>
+</head>
+
+<body>
+<div class="card">
+  <h2>🟠 Data Quality & Risk Analysis</h2>
+  <br>
+  <br>
+
+  <!-- Upload -->
+ <div>
+   <label class="upload-box">
+    <input type="file" id="files" multiple />
+    📂 Upload Excel files
+  </label>
+ </div>
+   <br>
+  <!-- Uploaded files -->
+  <div class="files" id="fileList"></div>
+
+  <!-- Actions -->
+  <button class="primary" id="analyzeBtn">Analyze Risk</button>
+  <br>
+
+  <button class="success" id="downloadClean" disabled>
+    Download Cleaned Transactions
+  </button>
+
+  <button class="success" id="downloadRisk" disabled>
+    Download Risk Summary
+  </button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
+<script type="module">
+  import init, { process_risk_analysis } from "../risk_wasm/pkg/risk_wasm.js";
+  await init();
+
+  let cleanedData = null;
+  let riskSummary = null;
+
+  const fileInput = document.getElementById("files");
+  const fileList = document.getElementById("fileList");
+
+  fileInput.addEventListener("change", () => {
+    fileList.innerHTML = "";
+    Array.from(fileInput.files).forEach(f => {
+      const div = document.createElement("div");
+      div.className = "file-item";
+      div.innerHTML = `
+        <span>${f.name}</span>
+        <span class="status-ok">✔ Uploaded</span>
+      `;
+      fileList.appendChild(div);
+    });
+  });
+
+  /* ===== Normalize Excel Headers ===== */
+  function normalizeKeys(rows) {
+    return rows.map(row => {
+      const obj = {};
+      for (const k in row) {
+        const key = k.toLowerCase().replace(/\s+/g, "_");
+        if (key === "transaction_id") obj.transaction_id = String(row[k]).trim();
+        if (key === "customer_id") {
+          const v = String(row[k] || "").trim();
+          obj.customer_id = v === "" ? null : v;
+        }
+        if (key === "amount") obj.amount = Number(row[k] || 0);
+      }
+      return obj;
+    });
+  }
+
+  async function readExcel(file) {
+    const buffer = await file.arrayBuffer();
+    const wb = XLSX.read(buffer);
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    return normalizeKeys(XLSX.utils.sheet_to_json(sheet));
+  }
+
+  /* ===== Analyze ===== */
+  document.getElementById("analyzeBtn").addEventListener("click", async () => {
+    const files = fileInput.files;
+    if (files.length !== 2) {
+      alert("Please upload exactly 2 Excel files");
+      return;
+    }
+
+    const data1 = await readExcel(files[0]);
+    const data2 = await readExcel(files[1]);
+
+    const result = process_risk_analysis(
+      JSON.stringify(data1),
+      JSON.stringify(data2)
+    );
+
+    const parsed = JSON.parse(result);
+    cleanedData = parsed.cleaned_transactions;
+    riskSummary = parsed.risk_summary;
+
+    document.getElementById("downloadClean").disabled = false;
+    document.getElementById("downloadRisk").disabled = false;
+
+    alert("Risk analysis completed successfully");
+  });
+
+  /* ===== Download Excel ===== */
+  function downloadExcel(data, filename) {
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+    XLSX.writeFile(wb, filename);
+  }
+
+  document.getElementById("downloadClean").onclick = () =>
+    downloadExcel(cleanedData, "Cleaned_Transactions.xlsx");
+
+  document.getElementById("downloadRisk").onclick = () =>
+    downloadExcel(riskSummary, "Risk_Summary.xlsx");
+</script>
+
+</body>
+</html>

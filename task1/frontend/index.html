@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Payroll Processing</title>
+  <link rel="icon" href="data:,">
+
+  <style>
+    :root {
+      --primary: #2563eb;
+      --success: #16a34a;
+      --bg: #f4f6f9;
+      --card: #ffffff;
+      --border: #e5e7eb;
+      --text: #1f2937;
+      --muted: #6b7280;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 40px;
+      background: var(--bg);
+      font-family: "Segoe UI", Roboto, Arial, sans-serif;
+      color: var(--text);
+    }
+
+    .container {
+      max-width: 860px;
+      margin: auto;
+    }
+
+    .card {
+      background: var(--card);
+      border-radius: 12px;
+      padding: 32px;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.08);
+    }
+
+    .header h2 {
+      margin: 0 0 6px;
+      font-size: 22px;
+    }
+
+    .header p {
+      margin: 0;
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    .section {
+      margin-top: 28px;
+    }
+
+    .section-title {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 10px;
+    }
+
+    .upload-box {
+      border: 2px dashed var(--border);
+      border-radius: 10px;
+      padding: 28px;
+      text-align: center;
+      background: #fafafa;
+      cursor: pointer;
+      transition: border-color 0.2s ease;
+    }
+
+    .upload-box:hover {
+      border-color: var(--primary);
+    }
+
+    .upload-box span {
+      display: block;
+      margin-top: 6px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    input[type="file"] {
+      display: none;
+    }
+
+    .file-list {
+      margin-top: 12px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .file-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background: #f9fafb;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 14px;
+    }
+
+    .file-status {
+      color: var(--success);
+      font-weight: 600;
+    }
+
+    .actions {
+      margin-top: 32px;
+      display: flex;
+      gap: 14px;
+    }
+
+    button {
+      padding: 12px 22px;
+      border-radius: 8px;
+      border: none;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: #fff;
+    }
+
+    .btn-primary:hover {
+      background: #1d4ed8;
+    }
+
+    .btn-success {
+      background: var(--success);
+      color: #fff;
+    }
+
+    .btn-success:disabled {
+      background: #9ca3af;
+      cursor: not-allowed;
+    }
+
+    .status {
+      margin-top: 18px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    .status.success {
+      color: var(--success);
+      font-weight: 600;
+    }
+  </style>
+</head>
+
+<body>
+<div class="container">
+  <div class="card">
+
+    <div class="header">
+      <h2>🔵 Payroll Processing</h2>
+      <p>Upload required Excel files and generate payroll report.</p>
+    </div>
+
+    <!-- Upload Section -->
+    <div class="section">
+      <div class="section-title">1. Upload Excel Files</div>
+
+      <label class="upload-box">
+        <input type="file" id="files" multiple />
+        📂 Upload required Excel files
+       
+      </label>
+    </div>
+
+    <!-- Uploaded Files (hidden initially) -->
+    <div class="section" id="uploadedSection" style="display:none;">
+      <div class="section-title">2. Uploaded Files</div>
+      <div class="file-list" id="fileList"></div>
+    </div>
+
+    <!-- Actions -->
+    <div class="section actions">
+      <button class="btn-primary" id="processBtn">Process Payroll</button>
+      <button class="btn-success" id="downloadBtn" disabled>Download Result</button>
+    </div>
+
+    <div class="status" id="status"></div>
+
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
+<script type="module">
+  import init, { process_payroll } from "./pkg/payroll_wasm.js";
+  await init();
+
+  let payrollBlob = null;
+
+  const fileInput = document.getElementById("files");
+  const uploadedSection = document.getElementById("uploadedSection");
+  const fileList = document.getElementById("fileList");
+  const status = document.getElementById("status");
+  const downloadBtn = document.getElementById("downloadBtn");
+
+  fileInput.addEventListener("change", () => {
+    fileList.innerHTML = "";
+    status.textContent = "";
+    downloadBtn.disabled = true;
+    payrollBlob = null;
+
+    if (fileInput.files.length === 0) {
+      uploadedSection.style.display = "none";
+      return;
+    }
+
+    uploadedSection.style.display = "block";
+
+    Array.from(fileInput.files).forEach(file => {
+      const div = document.createElement("div");
+      div.className = "file-item";
+      div.innerHTML = `
+        <div>${file.name}</div>
+        <div class="file-status">✔ Uploaded</div>
+      `;
+      fileList.appendChild(div);
+    });
+  });
+
+  function normalizeKeys(rows) {
+    return rows.map(r => {
+      const o = {};
+      for (const k in r) {
+        const key = k.toLowerCase().replace(/\s+/g, "_");
+        if (
+          ["employee_id","name","department","basic_salary","allowance","days_present"]
+          .includes(key)
+        ) o[key] = r[k];
+      }
+      if (o.days_present !== undefined) o.days_present = Number(o.days_present || 0);
+      if (o.basic_salary !== undefined) o.basic_salary = Number(o.basic_salary || 0);
+      if (o.allowance !== undefined) o.allowance = Number(o.allowance || 0);
+      if ("name" in o && !o.name) o.name = "UNKNOWN";
+      if ("department" in o && !o.department) o.department = "UNKNOWN";
+      return o;
+    });
+  }
+
+  async function readExcel(file) {
+    const buffer = await file.arrayBuffer();
+    const wb = XLSX.read(buffer);
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    return normalizeKeys(XLSX.utils.sheet_to_json(sheet));
+  }
+
+  document.getElementById("processBtn").addEventListener("click", async () => {
+    status.textContent = "";
+
+    const files = Array.from(fileInput.files);
+    if (files.length !== 3) {
+      alert("Please upload exactly 3 Excel files");
+      return;
+    }
+
+    try {
+      let emp, att, sal;
+
+      for (const f of files) {
+        const data = await readExcel(f);
+        const keys = Object.keys(data[0] || {});
+        if (keys.includes("days_present")) att = data;
+        else if (keys.includes("basic_salary")) sal = data;
+        else emp = data;
+      }
+
+      const result = process_payroll(
+        JSON.stringify(emp),
+        JSON.stringify(att),
+        JSON.stringify(sal)
+      );
+
+      const finalData = JSON.parse(result);
+      const ws = XLSX.utils.json_to_sheet(finalData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Final Payroll");
+
+      const buffer = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+      payrollBlob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      });
+
+      downloadBtn.disabled = false;
+      status.textContent = "✔ Payroll processed successfully";
+      status.className = "status success";
+
+    } catch (e) {
+      console.error(e);
+      alert("Error processing payroll. Check console.");
+    }
+  });
+
+  downloadBtn.addEventListener("click", () => {
+    if (!payrollBlob) return;
+    const url = URL.createObjectURL(payrollBlob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "Final_Payroll_Report.xlsx";
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+</script>
+
+</body>
+</html>
